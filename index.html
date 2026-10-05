@@ -251,14 +251,32 @@ function append(str){
   updateCount();save();
 }
 
+let lastFinal="";
+function norm(x){return x.replace(/[\s。、．，,.!?！？]/g,"")}
+function commit(raw){
+  let t=raw.trim(); if(!t) return;
+  const n=norm(t), l=norm(lastFinal);
+  if(!n) return;
+  if(l && (n===l || l.endsWith(n))) return;           // 同じ文の重複は捨てる
+  if(l && n.startsWith(l)){                              // 前の文を含んで届いた場合は増えた分だけ
+    let cut=0, k=0; while(cut<t.length && k<l.length){ if(norm(t[cut])) k++; cut++; }
+    t=t.slice(cut).replace(/^[\s、。]+/,""); if(!norm(t)){lastFinal=raw.trim();return}
+  }
+  lastFinal=raw.trim();
+  append(t+"。");
+}
 function startRecognition(){
-  rec=new SR(); rec.lang="ja-JP"; rec.continuous=true; rec.interimResults=true;
+  // Androidは連続モードで同じ文が繰り返し届く不具合があるため、1文ずつ区切って聞き取る
+  const isAndroid=/Android/i.test(navigator.userAgent);
+  rec=new SR(); rec.lang="ja-JP"; rec.continuous=!isAndroid; rec.interimResults=true;
+  let done=0; // この回の聞き取りで確定済みの件数
+  rec.onstart=()=>{done=0};
   rec.onresult=e=>{
     heardAt=Date.now();$("hear").textContent="● 聞き取っています";
     let interim="";
-    for(let i=e.resultIndex;i<e.results.length;i++){
+    for(let i=done;i<e.results.length;i++){
       const r=e.results[i];
-      if(r.isFinal){const t=r[0].transcript.trim();if(t)append(t+"。")}
+      if(r.isFinal){commit(r[0].transcript);done=i+1}
       else interim+=r[0].transcript;
     }
     $("interim").textContent=interim;
