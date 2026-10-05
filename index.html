@@ -69,6 +69,22 @@ label{display:flex;flex-direction:column;gap:4px;font-size:.84rem;color:var(--mu
 #minutes input,#minutes select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;width:100%}
 .btn.wide{justify-content:center;width:100%;padding:15px;font-size:1.02rem}
 .flow{margin:0;padding-left:1.3em;font-size:.86rem;color:var(--muted);display:flex;flex-direction:column;gap:2px}
+.sheet{display:flex;flex-direction:column;gap:16px}
+.sheet-head{border-bottom:2px solid var(--ink);padding-bottom:8px;display:flex;flex-direction:column;gap:4px}
+.sheet-head h3{font-family:var(--f-display);font-size:1.25rem;margin:0}
+.kv{display:grid;grid-template-columns:4.5em 1fr;gap:2px 10px;font-size:.88rem;margin:0}
+.kv dt{color:var(--muted)} .kv dd{margin:0;min-width:0}
+.blk h4{font-size:.78rem;letter-spacing:.12em;color:var(--accent);margin:0 0 6px}
+.blk p{margin:0}
+.blk ul{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:3px}
+.topic{margin-bottom:10px} .topic b{display:block}
+.tbl{overflow-x:auto}
+.tbl table{border-collapse:collapse;width:100%;font-size:.88rem;min-width:300px}
+.tbl th,.tbl td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+.tbl th{font-size:.75rem;color:var(--muted)}
+.tbl td.due{font-family:var(--f-mono);font-size:.8rem;white-space:nowrap}
+.none{color:var(--muted);font-size:.88rem}
+.sublink{color:var(--accent);font-weight:700}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -121,13 +137,19 @@ label{display:flex;flex-direction:column;gap:4px;font-size:.84rem;color:var(--mu
       <option value="brief">簡潔（要点だけ）</option>
       <option value="formal">フォーマル（社外・提出用）</option>
     </select></label>
-    <button class="btn primary wide" id="b-minutes">Claudeで議事録を作成</button>
-    <ol class="flow">
-      <li>ボタンを押すと、文字起こしと作成の指示がコピーされ、Claudeが開きます。</li>
-      <li>Claudeの入力欄を長押しして<b>「ペースト（貼り付け）」</b>→ 送信。</li>
-      <li>Claudeが概要・決定事項・ToDoを整理した議事録を作ります。</li>
-    </ol>
-    <p class="msg">Claudeのアカウント（無料でも可）でログインしている必要があります。</p>
+    <button class="btn primary wide" id="b-minutes">議事録を作成</button>
+    <p class="msg">スマホの中だけで、文字起こしから決定事項・ToDo・議題ごとの要点を整理します。</p>
+  </section>
+
+  <section class="card" id="result" hidden>
+    <h2 class="step"><small>RESULT</small>議事録</h2>
+    <div class="sheet" id="sheet"></div>
+    <div class="row">
+      <button class="btn primary" id="b-mcopy">メール用にコピー</button>
+      <button class="btn" id="b-msave">.txt で保存</button>
+      <button class="btn" id="b-again">作り直す</button>
+    </div>
+    <p class="msg">内容はスマホの中で自動整理したものです。送る前に一度目を通してください。<br><a href="#" id="b-claude" class="sublink">Claudeでさらに文章を整える（任意）</a></p>
   </section>
 
   <section class="card" id="audio-card" hidden>
@@ -284,7 +306,7 @@ function stopAll(){
   $("b-pause").disabled=true;$("b-pause").textContent="一時停止";$("b-mark").disabled=true;
   ["o-audio","o-lang"].forEach(id=>$(id).disabled=false);
   elapsed=0;lastLineAt=-1;
-  if($("text").value.trim())msg("録音を終えました。内容を確認して、STEP 3 の「Claudeで議事録を作成」を押してください。");
+  if($("text").value.trim())msg("録音を終えました。内容を確認して、STEP 3 の「議事録を作成」を押してください。");
 }
 
 $("b-main").onclick=()=>state==="idle"?start():stopAll();
@@ -320,22 +342,161 @@ function buildPrompt(t){
 # 文字起こし
 ${t}`;
 }
-$("b-minutes").onclick=async()=>{
+// 端末内で文字起こしから議事録を組み立てる（外部送信なし）
+function makeMinutes(raw, meta){
+  meta = meta || {};
+  const FILLERS = /^(えーと|えっと|えー|ええと|あのー?|そのー?|まあ|うーん|んー|はい|ええ|うん|そうですね|なるほど|とりあえず|あと|で|それで)[、,\s]*/;
+  const DEC = /(決定し|決定で|決まりました|決めました|確定|採用し|承認|合意|でいきましょう|で行きましょう|で進めましょう|とします|ことにします|ことにしましょう|動かしたくない|動かさない|変更しない|のままで(いき|行き|いい)|^(じゃあ|では|それでは).{2,30}で(お願いします|いきます|行きます))/;
+  const REQ = /(お願いします|お願いでき|お願いして|てください|でください|ておいて|もらえますか|いただけますか|てもらえ)/;
+  const GREET = /(よろしくお願いします|よろしくお願いいたします|ありがとうございま|お疲れ様|おつかれさま|失礼します|お願いしまーす)/;
+  const SELF = /(しておきます|しときます|やります|やっておきます|対応します|確認します|連絡します|送ります|共有します|準備します|手配します|作成します|調べます|もらっておきます|報告します)/;
+  const OPEN = /(持ち越し|保留|検討|未定|まだ決まって|決まってない|決まっていない|課題|懸念|判断しましょう|判断する|後日|見てから|そろってから)/;
+  const WEEK = "月火水木金土日";
+  const NOT_NAME = /^(業者|お客|お客様|皆|みな|先方|相手|担当|社長|部長|課長|店長|先生|皆様|業者様|事務|上|下|前)$/;
+
+  const sections = [];
+  let cur = {lines:[]};
+  raw.replace(/\r/g,"").split("\n").forEach(line=>{
+    if(/――\s*\[[\d:]+\]\s*ここで区切り\s*――/.test(line)){ if(cur.lines.length) sections.push(cur); cur={lines:[]}; return; }
+    if(/――\s*録音開始/.test(line)) return;
+    line = line.replace(/\[\d{2}:\d{2}:\d{2}\]\s*/g,"");
+    line.split(/(?<=[。！？!?])/).forEach(s=>{
+      s = s.trim(); let prev;
+      do{ prev=s; s=s.replace(FILLERS,"").trim(); }while(s!==prev);
+      if(GREET.test(s) && s.length<20) return;
+      if(s.replace(/[。、！？!?\s]/g,"").length < 4) return;
+      if(!/[。！？!?]$/.test(s)) s += "。";
+      cur.lines.push(s);
+    });
+  });
+  if(cur.lines.length) sections.push(cur);
+  const all = sections.flatMap(s=>s.lines);
+
+  // 出席者：入力 → 自己紹介「◯◯です」→「◯◯さん」
+  let people = (meta.people||"").split(/[、,，\s]+/).map(x=>x.trim()).filter(Boolean);
+  if(!people.length){
+    const found = new Set();
+    all.forEach(s=>{ const m=s.match(/^([一-龠々ァ-ヶ]{1,5})です[。、]/); if(m && !NOT_NAME.test(m[1])) found.add(m[1]); });
+    all.forEach(s=>{ (s.match(/([一-龠々ァ-ヶ]{1,4})さん/g)||[]).forEach(x=>{const n=x.replace(/さん$/,""); if(!NOT_NAME.test(n)) found.add(n);}); });
+    people = [...found].slice(0,12);
+  }
+
+  const base = meta.date ? new Date(meta.date) : new Date();
+  const fmtD = d => `${d.getMonth()+1}/${d.getDate()}（${WEEK[(d.getDay()+6)%7]}）`;
+  function dueOf(s){
+    let m;
+    if((m=s.match(/(\d{1,2})月(\d{1,2})日/))) return `${m[1]}/${m[2]}`;
+    if((m=s.match(/(\d{1,2})\/(\d{1,2})/))) return `${m[1]}/${m[2]}`;
+    if(/今日中|本日中/.test(s)) return fmtD(base);
+    if(/明日/.test(s)){const d=new Date(base);d.setDate(d.getDate()+1);return fmtD(d);}
+    if((m=s.match(/(来週|今週)の?([月火水木金土日])曜/)) || (m=s.match(/()([月火水木金土日])曜日?(まで|中)/))){
+      const d=new Date(base); let diff=WEEK.indexOf(m[2])-(d.getDay()+6)%7;
+      if(m[1]==="来週") diff+=7; else if(diff<0) diff+=7;
+      d.setDate(d.getDate()+diff); return fmtD(d);
+    }
+    if(/今週中/.test(s)) return "今週中";
+    if(/来週中/.test(s)) return "来週中";
+    if(/月末/.test(s)) return "月末";
+    if(/次回(まで|の定例|の会議)|次の定例/.test(s)) return "次回まで";
+    return "";
+  }
+  const ownerIn = s => { for(const p of people){ if(new RegExp("^"+p+"さん|^"+p+"(です)?[、。]|"+p+"さん[、,]").test(s)) return p; } return ""; };
+  const speakerOf = s => { const m=s.match(/^([一-龠々ァ-ヶ]{1,5})です[。、]/); return m&&!NOT_NAME.test(m[1])?m[1]:""; };
+  const tidy = s => s.replace(/^([一-龠々ァ-ヶ]{1,5})(さん|です)[、。]\s*/,"").replace(/^(じゃあ|では|それでは|とりあえず|あと)[、]?/,"").trim();
+  const asTask = s => people.reduce((x,p)=>x.replace(new RegExp("^"+p+"さん[、,\\s]?"),""), tidy(s))
+      .replace(/(を)?(お願いできますか|お願いできます|お願いします)[。]?$/,"")
+      .replace(/(て|で)(ください|おいてください)[。]?$/,"$1おく").replace(/っておく$/,"る").replace(/しておく$/,"する").replace(/ておく$/,"る")
+      .replace(/(してもらえ|していただけ|お願いでき)(ますか|ます)?[。]?$/,"")
+      .replace(/(もらえますか|いただけますか)[。]?$/,"")
+      .replace(/[。？?]$/,"").trim();
+  const shorten = (s,n=70) => s.length>n ? s.slice(0,n-1)+"…" : s;
+  const isQuestion = s => /(か。|か？|\?|？|でしょうか)$/.test(s);
+
+  const decisions=[], actions=[], open=[]; let next="";
+  let speaker="";
+  all.forEach((s,i)=>{
+    const sp = speakerOf(s); if(sp) speaker=sp;
+    if(/^次回は/.test(tidy(s)) || (/次回は/.test(s) && /(\d|時|曜)/.test(s) && !REQ.test(s))){ if(!next) next=tidy(s).replace(/^次回は/,"").replace(/です。$|。$/,""); return; }
+    const isOpen = OPEN.test(s);
+    if(isOpen) open.push(shorten(tidy(s)));
+    if(DEC.test(s) && !isOpen && !isQuestion(s)) decisions.push(shorten(tidy(s)));
+    const isDecisionReq = /^(じゃあ|では|それでは)/.test(s) && !ownerIn(s);
+    if(REQ.test(s) && !isDecisionReq){
+      actions.push({task:shorten(asTask(s),60), owner:ownerIn(s), due:dueOf(s), at:i});
+    }else if(SELF.test(s)){
+      const last = actions[actions.length-1];
+      if(last && i-last.at<=2 && (!last.owner || last.owner)){ if(!last.due) last.due=dueOf(s); else if(/\d|曜/.test(dueOf(s))) last.due=dueOf(s); }
+      else actions.push({task:shorten(asTask(s),60), owner:speaker, due:dueOf(s), at:i});
+    }
+  });
+  const uniq = arr => [...new Set(arr)];
+  const acts=[]; const seen=new Set();
+  actions.forEach(a=>{const k=a.task.slice(0,16); if(a.task.length>=2 && !seen.has(k)){seen.add(k);acts.push({task:a.task,owner:a.owner,due:a.due});}});
+
+  const scoreOf = s => (/\d/.test(s)?2:0)+(DEC.test(s)?3:0)+(REQ.test(s)||SELF.test(s)?2:0)+(OPEN.test(s)?1:0)+(/(予定|報告|件|円|%|名|人|遅れ|変更|追加|費用|予算|決まって)/.test(s)?1:0)-(s.length<12?1:0)-(isQuestion(s)?1:0);
+  const agenda = sections.map((sec,idx)=>{
+    let title="";
+    for(const s of sec.lines){ const m=tidy(s).replace(/^(今日は|本日は|今回は|次は|続いて)/,"").match(/^([^、。]{2,16}?)(について|の件|の方ですが|ですが)/); if(m){title=m[1].replace(/^(の|は)/,"");break;} }
+    if(!title) title = sections.length>1 ? `議題${idx+1}` : "話し合った内容";
+    const pts = sec.lines.filter(s=>!/^次回は/.test(tidy(s))).map((s,i)=>({s:tidy(s),i,sc:scoreOf(s)})).filter(x=>x.sc>0)
+      .sort((a,b)=>b.sc-a.sc).slice(0, meta.style==="brief"?3:5).sort((a,b)=>a.i-b.i).map(x=>shorten(x.s,80));
+    return {topic:title, points:uniq(pts)};
+  });
+
+  const intro = all.find(s=>/(今日は|本日は|今回は).*(確認|話|共有|報告|議題|について)/.test(s));
+  const d=uniq(decisions), o=uniq(open).filter(x=>!d.includes(x));
+  const summary = [intro ? tidy(intro).replace(/^始めます。/,"") : "", `決定事項${d.length}件、ToDo${acts.length}件${o.length?`、継続検討${o.length}件`:""}。`].filter(Boolean).join(" ");
+  return {
+    title: meta.title || "会議 議事録",
+    datetime: base.toLocaleString("ja-JP",{year:"numeric",month:"long",day:"numeric",hour:"2-digit",minute:"2-digit"}),
+    attendees: people, summary, decisions:d, actions:acts, agenda, open_issues:o, next_meeting:next
+  };
+}
+
+const esc=x=>String(x??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let current=null;
+function renderMinutes(m){
+  current=m;
+  const li=a=>a.map(x=>`<li>${esc(x)}</li>`).join("");
+  const none='<p class="none">なし</p>';
+  const kv=[["日時",m.datetime],["出席者",m.attendees.join("、")],["次回",m.next_meeting]].filter(r=>r[1]);
+  let h=`<div class="sheet-head"><h3>${esc(m.title)}</h3><dl class="kv">${kv.map(([k,v])=>`<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}</dl></div>`;
+  h+=`<div class="blk"><h4>概要</h4><p>${esc(m.summary)}</p></div>`;
+  h+=`<div class="blk"><h4>決定事項</h4>${m.decisions.length?`<ul>${li(m.decisions)}</ul>`:none}</div>`;
+  h+=`<div class="blk"><h4>ToDo（宿題）</h4>${m.actions.length?`<div class="tbl"><table><thead><tr><th>内容</th><th>担当</th><th>期限</th></tr></thead><tbody>${m.actions.map(a=>`<tr><td>${esc(a.task)}</td><td>${esc(a.owner||"未定")}</td><td class="due">${esc(a.due||"—")}</td></tr>`).join("")}</tbody></table></div>`:none}</div>`;
+  h+=`<div class="blk"><h4>議題と内容</h4>${m.agenda.map(t=>`<div class="topic"><b>${esc(t.topic)}</b><ul>${li(t.points)}</ul></div>`).join("")||none}</div>`;
+  if(m.open_issues.length) h+=`<div class="blk"><h4>保留・継続検討</h4><ul>${li(m.open_issues)}</ul></div>`;
+  $("sheet").innerHTML=h;$("result").hidden=false;
+}
+function minutesText(m){
+  const L=[`【議事録】${m.title}`,`日時：${m.datetime}`];
+  if(m.attendees.length)L.push(`出席者：${m.attendees.join("、")}`);
+  L.push("","■概要",m.summary,"","■決定事項",...(m.decisions.length?m.decisions.map(d=>`・${d}`):["・なし"]));
+  L.push("","■ToDo",...(m.actions.length?m.actions.map(a=>`・${a.task}（担当：${a.owner||"未定"}／期限：${a.due||"—"}）`):["・なし"]));
+  L.push("","■議題と内容");m.agenda.forEach(t=>L.push(`＜${t.topic}＞`,...t.points.map(p=>`・${p}`)));
+  if(m.open_issues.length)L.push("","■保留・継続検討",...m.open_issues.map(d=>`・${d}`));
+  if(m.next_meeting)L.push("",`次回：${m.next_meeting}`);
+  return L.join("\n");
+}
+$("b-minutes").onclick=()=>{
   const t=$("text").value.trim();
   if(!t){toast("文字起こしがまだありません");$("text").focus();return}
-  const p=buildPrompt(t);
-  let ok=false;
-  try{await navigator.clipboard.writeText(p);ok=true}catch(e){
-    const ta=document.createElement("textarea");ta.value=p;document.body.appendChild(ta);ta.select();
-    try{ok=document.execCommand("copy")}catch(_){}ta.remove();
-  }
-  if(!ok){toast("コピーできませんでした。文字起こしを長押しでコピーしてください");return}
-  toast("コピーしました。Claudeの入力欄に貼り付けて送信してください");
-  setTimeout(()=>{location.href=CLAUDE_URL},900);
+  const m=makeMinutes(t,{title:$("m-title").value.trim(),people:$("m-people").value,style:$("m-style").value});
+  renderMinutes(m);ls.set("rec_last",JSON.stringify(m));
+  $("result").scrollIntoView({behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth",block:"start"});
 };
+$("b-again").onclick=()=>$("b-minutes").click();
+async function copyStr(p){try{await navigator.clipboard.writeText(p);return true}catch(e){const ta=document.createElement("textarea");ta.value=p;document.body.appendChild(ta);ta.select();let ok=false;try{ok=document.execCommand("copy")}catch(_){}ta.remove();return ok}}
+$("b-mcopy").onclick=async()=>{if(current&&await copyStr(minutesText(current)))toast("コピーしました。メールやLINEに貼り付けできます")};
+$("b-claude").onclick=async e=>{
+  e.preventDefault();const t=$("text").value.trim();if(!t)return;
+  if(await copyStr(buildPrompt(t))){toast("コピーしました。Claudeの入力欄に貼り付けて送信してください");setTimeout(()=>{location.href=CLAUDE_URL},900)}
+};
+try{const lm=JSON.parse(ls.get("rec_last","null"));if(lm&&lm.agenda)renderMinutes(lm)}catch(e){}
 ["m-title","m-people","m-style"].forEach(id=>{const v=ls.get("rec_"+id,"");if(v)$(id).value=v;$(id).addEventListener("change",()=>ls.set("rec_"+id,$(id).value))});
 function dl(blob,name){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1000)}
 const stamp=()=>new Date().toLocaleString("sv-SE").slice(0,16).replace(/[-: ]/g,"");
+$("b-msave").onclick=()=>{if(current)dl(new Blob([minutesText(current)],{type:"text/plain;charset=utf-8"}),`議事録_${stamp()}.txt`)};
 $("b-save").onclick=()=>{const t=$("text").value;if(!t.trim()){toast("文字起こしがまだありません");return}dl(new Blob([t],{type:"text/plain;charset=utf-8"}),`会議_${stamp()}.txt`)};
 $("b-audio-save").onclick=()=>{if(!audioBlob)return;const ext=(audioBlob.type.includes("mp4")?"m4a":"webm");dl(audioBlob,`会議_${stamp()}.${ext}`)};
 $("b-clear").onclick=()=>{
