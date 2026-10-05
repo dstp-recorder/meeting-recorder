@@ -87,6 +87,20 @@ label{display:flex;flex-direction:column;gap:4px;font-size:.84rem;color:var(--mu
 .sublink{color:var(--accent);font-weight:700}
 .warnbox{background:var(--surface);border:2px solid var(--err);border-radius:12px;padding:12px 14px;font-weight:700;line-height:1.6}
 .hear{font-size:.85rem;color:var(--live);font-weight:700;min-height:1.4em;margin:0}
+.import{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--line);padding-top:12px}
+.file{position:relative;overflow:hidden;align-self:flex-start}
+.file input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.dict{border-top:1px solid var(--line);padding-top:12px}
+.dict summary{cursor:pointer;font-weight:700;color:var(--accent);display:flex;gap:8px;align-items:baseline}
+.dict summary .meta{font-family:var(--f-mono);font-size:.75rem;color:var(--muted);font-weight:500}
+.dict[open]{display:flex;flex-direction:column;gap:10px}
+.dict-add{display:grid;grid-template-columns:1fr auto 1fr auto;gap:6px;align-items:center}
+@media (max-width:480px){.dict-add{grid-template-columns:1fr auto 1fr}.dict-add .btn{grid-column:1/-1;justify-content:center}}
+.dict-add input{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 10px;width:100%;min-width:0}
+.dict-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.dict-list li{display:flex;align-items:center;gap:8px;background:var(--sunk);border-radius:8px;padding:6px 10px;font-size:.9rem}
+.dict-list li span{flex:1;min-width:0;overflow-wrap:anywhere}
+.dict-list button{border:none;background:none;color:var(--err);font:700 .8rem var(--f-body);cursor:pointer;padding:4px}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -126,6 +140,22 @@ label{display:flex;flex-direction:column;gap:4px;font-size:.84rem;color:var(--mu
       <button class="btn" id="b-save">.txt で保存</button>
       <button class="btn" id="b-clear">クリア</button>
     </div>
+    <div class="import">
+      <p class="msg"><b>スマホの録音アプリの文字起こしも使えます。</b>ボイスメモ（iPhone）やレコーダー（Android）の文字起こしを上の欄に貼り付けるか、ファイルで読み込んでください。</p>
+      <span class="file btn"><span>ファイルから読み込む</span><input id="f-import" type="file" accept=".txt,.md,.vtt,.srt,text/plain" aria-label="文字起こしファイルを読み込む"></span>
+    </div>
+    <details class="dict" id="dict">
+      <summary>よく間違える言葉の登録<span class="meta" id="dict-count"></span></summary>
+      <p class="msg">社名・人名など、毎回同じように間違える言葉を登録すると、文字起こしを自動で直します。</p>
+      <div class="dict-add">
+        <input id="d-wrong" placeholder="間違い（例：でぃーてぃー）" autocomplete="off">
+        <span aria-hidden="true">→</span>
+        <input id="d-right" placeholder="正しい（例：DT）" autocomplete="off">
+        <button class="btn" id="d-add">登録</button>
+      </div>
+      <ul class="dict-list" id="dict-list"></ul>
+      <button class="btn" id="d-apply">登録した言葉で文字起こしを直す</button>
+    </details>
   </section>
 
   <section class="card" id="minutes">
@@ -204,7 +234,15 @@ let tt;function toast(t){$("toast").textContent=t;$("toast").hidden=false;clearT
 function updateCount(){$("count").textContent=$("text").value.length.toLocaleString()+" 文字"}
 function save(){ls.set("rec_text",$("text").value)}
 
+let dict=[];try{dict=JSON.parse(ls.get("rec_dict","[]"))||[]}catch(e){dict=[]}
+function fixWords(t){for(const [w,r] of dict){if(w)t=t.split(w).join(r)}return t}
+function renderDict(){
+  $("dict-list").innerHTML="";
+  dict.forEach(([w,r],i)=>{const li=document.createElement("li");const sp=document.createElement("span");sp.textContent=w+" → "+r;const b=document.createElement("button");b.textContent="削除";b.onclick=()=>{dict.splice(i,1);ls.set("rec_dict",JSON.stringify(dict));renderDict()};li.append(sp,b);$("dict-list").append(li)});
+  $("dict-count").textContent=dict.length?dict.length+"件":"";
+}
 function append(str){
+  str=fixWords(str);
   const ta=$("text"); const atEnd=ta.scrollTop+ta.clientHeight>=ta.scrollHeight-40;
   const t=now(); let prefix="";
   if($("o-time").checked && (lastLineAt<0||t-lastLineAt>30000)){prefix=`\n[${fmt(t)}] `;lastLineAt=t}
@@ -338,6 +376,19 @@ async function copyText(){
   try{await navigator.clipboard.writeText(t);return true}
   catch(e){const ta=$("text");ta.focus();ta.select();try{return document.execCommand("copy")}catch(_){return false}}
 }
+$("d-add").onclick=()=>{const w=$("d-wrong").value.trim(),r=$("d-right").value.trim();if(!w){toast("間違える言葉を入力してください");return}
+  dict=dict.filter(x=>x[0]!==w);dict.push([w,r]);dict.sort((a,b)=>b[0].length-a[0].length);ls.set("rec_dict",JSON.stringify(dict));$("d-wrong").value="";$("d-right").value="";renderDict();toast("登録しました")};
+$("d-apply").onclick=()=>{if(!dict.length){toast("まだ登録がありません");return}const before=$("text").value;$("text").value=fixWords(before);updateCount();save();toast(before===$("text").value?"直す言葉は見つかりませんでした":"文字起こしを直しました")};
+renderDict();
+$("f-import").addEventListener("change",e=>{
+  const f=e.target.files[0];if(!f)return;const r=new FileReader();
+  r.onload=()=>{let t=String(r.result);
+    if(/\.(vtt|srt)$/i.test(f.name))t=t.split(/\r?\n/).filter(l=>l.trim()&&!/^WEBVTT/.test(l)&&!/^\d+$/.test(l.trim())&&!/-->/.test(l)).join("\n");
+    const cur=$("text").value.trim();$("text").value=fixWords((cur?cur+"\n\n":"")+t.trim());updateCount();save();toast("「"+f.name+"」を読み込みました")};
+  r.onerror=()=>toast("読み込めませんでした。テキストファイル（.txt）か確認してください");
+  r.readAsText(f);e.target.value="";
+});
+$("text").addEventListener("paste",()=>setTimeout(()=>{if(dict.length){$("text").value=fixWords($("text").value);updateCount();save()}},0));
 $("b-copy").onclick=async()=>{if(await copyText())toast("コピーしました")};
 function buildPrompt(t){
   const style={standard:"社内向けの標準的な議事録",brief:"要点だけに絞った簡潔な議事録（各議題の要点は2〜3個まで）",formal:"社外にも出せるフォーマルな議事録（です・ます調）"}[$("m-style").value];
@@ -501,7 +552,7 @@ $("b-minutes").onclick=()=>{
   if(!t){toast("文字起こしがまだありません");$("text").focus();return}
   const latin=(t.match(/[A-Za-z]/g)||[]).length, ja=(t.match(/[ぁ-んァ-ヶ一-龠]/g)||[]).length;
   if(latin>ja){msg("文字起こしが日本語になっていません。スマホの設定で、キーボードの音声入力の言語に「日本語」が入っているか確認し、録音し直してください。",true);$("deck").scrollIntoView({block:"start"});return}
-  const m=makeMinutes(t,{title:$("m-title").value.trim(),people:$("m-people").value,style:$("m-style").value});
+  const m=makeMinutes(fixWords(t),{title:$("m-title").value.trim(),people:$("m-people").value,style:$("m-style").value});
   renderMinutes(m);ls.set("rec_last",JSON.stringify(m));
   $("result").scrollIntoView({behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth",block:"start"});
 };
