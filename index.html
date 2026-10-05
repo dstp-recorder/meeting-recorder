@@ -3,23 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0b3f94">
+<meta name="theme-color" content="#0a0c10">
 <title>録音議事録メーカー</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Zen+Maru+Gothic:wght@700;900&family=IBM+Plex+Mono:wght@500&display=swap">
 <style>
 :root{
-  --bg:#d9e6f7; --surface:#ffffff; --sunk:#c7daf2; --ink:#081a36; --muted:#33507a; --line:#9fbbe0;
-  --accent:#0b3f94; --accent-ink:#ffffff; --accent-soft:#bcd5f5; --live:#1458c4; --err:#c0392b;
+  /* 黒ベース＋青のボタン（常にこの配色） */
+  --bg:#0a0c10; --surface:#151920; --sunk:#0f1217; --ink:#eef2f8; --muted:#9aa6b8; --line:#2a313d;
+  --accent:#1f6feb; --accent-ink:#ffffff; --accent-soft:#16305c; --live:#4c9aff; --err:#ff6b5e;
   --f-display:"Zen Maru Gothic","Hiragino Maru Gothic ProN",system-ui,sans-serif;
   --f-body:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic",system-ui,sans-serif;
   --f-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
-  color-scheme:light;
+  color-scheme:dark;
 }
-@media (prefers-color-scheme: dark){:root{
-  --bg:#06122a; --surface:#0d2042; --sunk:#091936; --ink:#e4eefb; --muted:#93abc9; --line:#1f3d6e;
-  --accent:#4d9bff; --accent-ink:#06182e; --accent-soft:#123a75; --live:#4d9bff; --err:#ff7b6b; color-scheme:dark}}
 *{box-sizing:border-box}
 html,body{margin:0}
 body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.7;-webkit-text-size-adjust:100%}
@@ -102,6 +100,10 @@ label{display:flex;flex-direction:column;gap:4px;font-size:.84rem;color:var(--mu
 .dict-list li span{flex:1;min-width:0;overflow-wrap:anywhere}
 .dict-list button{border:none;background:none;color:var(--err);font:700 .8rem var(--f-body);cursor:pointer;padding:4px}
 [hidden]{display:none!important}
+.step small,.blk h4,.sublink,.dict summary{color:var(--live)}
+.btn:not(.primary){border-color:var(--accent);color:var(--live);background:transparent}
+.small{border-color:var(--accent);color:var(--live)}
+.logo{background:#ffffff;border-radius:12px;padding:4px}
 </style>
 </head>
 <body>
