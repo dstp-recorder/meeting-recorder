@@ -85,6 +85,8 @@ label{display:flex;flex-direction:column;gap:4px;font-size:.84rem;color:var(--mu
 .tbl td.due{font-family:var(--f-mono);font-size:.8rem;white-space:nowrap}
 .none{color:var(--muted);font-size:.88rem}
 .sublink{color:var(--accent);font-weight:700}
+.warnbox{background:var(--surface);border:2px solid var(--err);border-radius:12px;padding:12px 14px;font-weight:700;line-height:1.6}
+.hear{font-size:.85rem;color:var(--live);font-weight:700;min-height:1.4em;margin:0}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -95,7 +97,7 @@ label{display:flex;flex-direction:column;gap:4px;font-size:.84rem;color:var(--mu
     <div><h1>録音議事録メーカー</h1><p class="sub">録音して、そのまま議事録まで。スマホ1台で完結します。</p></div>
   </header>
 
-  <p class="msg err" id="unsupported" hidden>このブラウザは音声認識に対応していません。Androidは Chrome、iPhoneは Safari で開いてください。</p>
+  <p class="msg err warnbox" id="unsupported" hidden></p>
 
   <section class="card deck" id="deck">
     <h2 class="step"><small>STEP 1</small>録音する</h2>
@@ -108,10 +110,11 @@ label{display:flex;flex-direction:column;gap:4px;font-size:.84rem;color:var(--mu
       <button class="small" id="b-mark" disabled>しるし</button>
     </div>
     <div class="opts">
-      <label><input type="checkbox" id="o-audio"> 音声ファイルも残す</label>
+      <label><input type="checkbox" id="o-audio"> 音声ファイルも残す（文字にならない時はオフ）</label>
       <label><input type="checkbox" id="o-time" checked> 時刻を入れる</label>
       <label>言語 <select id="o-lang"><option value="ja-JP">日本語</option><option value="en-US">英語</option></select></label>
     </div>
+    <p class="hear" id="hear"></p>
     <p class="msg" id="msg" role="status"></p>
   </section>
 
@@ -183,10 +186,16 @@ let rec=null, stream=null, mediaRec=null, chunks=[], audioURL=null, audioBlob=nu
 let ctx=null, analyser=null, raf=0, wakeLock=null;
 let elapsed=0, tickStart=0, timer=0, lastLineAt=-1;
 
-$("o-audio").checked=!isIOS; // iPhoneは音声認識と同時録音が不安定なため既定オフ
+$("o-audio").checked=false; // 音声認識とマイクの同時使用は端末によって不安定なため既定オフ
 $("text").value=ls.get("rec_text","");
 updateCount();
-if(!SR){$("unsupported").hidden=false;$("b-main").disabled=true}
+const UA=navigator.userAgent;
+const envProblem = /Claude\/|Electron/.test(UA) ? "ここ（パソコンのClaudeアプリの中）では録音できません。スマホで、Androidは「Chrome」、iPhoneは「Safari」でこのページを開いてください。"
+  : /Line\/|FBAN|FBAV|Instagram|; wv\)/.test(UA) ? "LINEなどアプリの中のブラウザでは録音できません。右上（または下）のメニューから「ブラウザで開く」を選び、Chrome（Android）かSafari（iPhone）で開いてください。"
+  : (isIOS && navigator.standalone) ? "iPhoneのホーム画面から開くと録音できないことがあります。うまくいかない時は、Safariでこのページを開いてください。"
+  : !SR ? "このブラウザは音声の文字起こしに対応していません。Androidは「Chrome」、iPhoneは「Safari」で開いてください。" : "";
+if(envProblem){$("unsupported").textContent=envProblem;$("unsupported").hidden=false;if(!SR||/Claude\/|Electron/.test(UA))$("b-main").disabled=true}
+let heardAt=0, watch=0;
 
 function fmt(ms){const s=Math.floor(ms/1000);return [s/3600|0,(s%3600)/60|0,s%60].map(n=>String(n).padStart(2,"0")).join(":")}
 function now(){return elapsed+(state==="rec"?Date.now()-tickStart:0)}
@@ -208,6 +217,7 @@ function append(str){
 function startRecognition(){
   rec=new SR(); rec.lang=$("o-lang").value; rec.continuous=true; rec.interimResults=true;
   rec.onresult=e=>{
+    heardAt=Date.now();$("hear").textContent="● 聞き取っています";
     let interim="";
     for(let i=e.resultIndex;i<e.results.length;i++){
       const r=e.results[i];
@@ -219,13 +229,21 @@ function startRecognition(){
   rec.onerror=e=>{
     if(e.error==="not-allowed"||e.error==="service-not-allowed"){msg("マイクの使用が許可されていません。ブラウザの設定でこのサイトのマイクを許可してください。",true);stopAll()}
     else if(e.error==="audio-capture"){msg("マイクが使えません。他のアプリがマイクを使っていないか確認してください。",true)}
-    else if(e.error==="network"){msg("音声認識にはインターネット接続が必要です。通信状況を確認してください。",true)}
+    else if(e.error==="network"){msg("音声の文字起こしができません。インターネット接続を確認してください。それでもだめな時は、Androidは「Chrome」、iPhoneは「Safari」で開いてください。",true);stopAll()}
+    else if(e.error==="language-not-supported"){msg("この言語は文字起こしに対応していません。",true);stopAll()}
   };
   rec.onend=()=>{ if(state==="rec"){ try{rec.start()}catch(_){setTimeout(()=>{if(state==="rec")try{rec.start()}catch(__){}} ,300)} } }; // 無音で切れたら自動再開
   rec.start();
+  clearInterval(watch);heardAt=Date.now();
+  watch=setInterval(()=>{
+    if(state!=="rec")return;
+    if(Date.now()-heardAt>12000) $("hear").textContent="声が文字になっていません。スマホを話し手に近づけてください。続く場合は「音声ファイルも残す」をオフにして録音し直してください。";
+  },3000);
 }
 
 async function startAudio(){
+  if(!$("o-audio").checked){$("wave").hidden=true;return}
+  $("wave").hidden=false;
   stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});
   ctx=new (window.AudioContext||window.webkitAudioContext)();
   analyser=ctx.createAnalyser();analyser.fftSize=512;
@@ -301,6 +319,7 @@ function stopAll(){
   try{ctx&&ctx.close()}catch(_){}
   cancelAnimationFrame(raf);clearInterval(timer);
   try{wakeLock&&wakeLock.release()}catch(_){}
+  clearInterval(watch);$("hear").textContent="";
   $("clock").textContent=fmt(elapsed);$("interim").textContent="";
   $("b-main").dataset.mode="start";$("b-main").textContent="録音開始";
   $("b-pause").disabled=true;$("b-pause").textContent="一時停止";$("b-mark").disabled=true;
